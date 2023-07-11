@@ -1,0 +1,422 @@
+---
+title: "Portfolio Theory Project"
+output: html_document
+date: ""
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Stephen Kiwon Shin
+
+## Table of Contents
+0. Introduction
+1. Data Summary
+2. Return calculations and Sample Statistics
+3. ETF distributions
+4. Portfolio Theory
+5. Risk Report
+6. Summary
+```{r, echo = FALSE}
+options(digits=3, width=70)
+# load packages
+suppressPackageStartupMessages(library(IntroCompFinR))
+suppressPackageStartupMessages(library(PerformanceAnalytics))
+suppressPackageStartupMessages(library(quantmod))
+suppressPackageStartupMessages(library(boot))
+suppressPackageStartupMessages(library(corrplot))
+suppressPackageStartupMessages(library(xtable))
+suppressPackageStartupMessages(library(knitr))
+suppressPackageStartupMessages(library(lubridate))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(gridExtra))
+
+# change this to the appropriate path on your computer
+savePath="D:\\Work\\Portfolioproj"
+resetPar = par()
+```
+
+```{r, echo=FALSE}
+# retrieve data for questions
+last.date = as.Date("2023-04-28")
+# last.date = Sys.Date()
+first.date = last.date - years(5)
+project.symbols = c("VTI","VTEB","VEA","VWO","VIG")
+project.prices <- 
+  getSymbols(project.symbols, src = 'yahoo', 
+             from = as.character(first.date), 
+             to = as.character(last.date),
+             auto.assign = TRUE, 
+             warnings = FALSE) %>% 
+  map(~Ad(get(.))) %>% 
+  reduce(merge) %>%
+  `colnames<-`(project.symbols)
+projectPrices = to.monthly(project.prices, OHLC=FALSE)
+projectReturns = na.omit(Return.calculate(projectPrices, method = "discrete"))
+
+```
+
+```{r, echo = FALSE}
+mean.vals = colMeans(projectPrices)
+var.vals = apply(projectPrices, 2, var)
+sd.vals = apply(projectPrices, 2, sd)
+skew.vals = apply(projectPrices, 2, skewness)
+kurt.vals = apply(projectPrices, 2, kurtosis)
+stats.mat = rbind(mean.vals,
+                  var.vals,
+                  sd.vals,
+                  skew.vals,
+                  kurt.vals)
+rownames(stats.mat) = c("Mean", "Variance", "Std Dev", "Skewness", 
+                        "Excess Kurtosis")
+muhat = apply(projectReturns, 2, mean)
+sig2hat = apply(projectReturns, 2, var)
+sighat = apply(projectReturns, 2, sd)
+sigma.mat=var(projectReturns)
+cormat = cor(projectReturns)
+stats.r.mat = rbind(muhat,
+                  sig2hat,
+                  sighat)
+rownames(stats.r.mat) = c("Mean", "Variance", "Std Dev")
+```
+## 0. Introduction
+
+  In this Project, we will be using R to understand and demonstrate Portfolio Theory using real data from Yahoo Finance. The report assumes that the audience has a little bit of prior knowledge about portfolio theory, but it will explain many of the basic terms when necessary. The main objective that will be emphasized is the assignment of weights in a portfolio holding Vanguard ETFs, and the three most common/useful portfolios to start looking at. There won't be a universally optimal way to assign the weights in the portfolio, this is because the ideal portfolio is highly dependent on the investor and its risk tolerance. Because of this, we are going to display very detailed information about how these specific ETFs contribute to risk. We are going to be constructing three different portfolios:
+
+* Equally-Weighted Portfolio 
+* Global Minimum Variance Portfolio
+* Tangency Portfolio
+
+Each of these portfolios will have different weights to the assets that they contain, and will adhere to a specific objective.
+
+## 1. Data Summary
+
+  Below is a quick summary of each ETFs and a couple attributes that can be said about each one.
+
+### VTEB
+
+  VTEB(Vanguard Tax-Exempt Bond Index Fund) tracks a market-weighted index of investment-grade debt that is issued by the government at both state and local level. The interest earned by this index is exempt from US income tax and AMT. It's beta is .98, which means its highly exposed to market risk, but is expected to yield higher return. Almost no diversifiable risk since its R-squared is around 99.
+
+### VTI
+
+  VTI(Vanguard Total Stock Market Index) attempts to track a market-cap-weighted portfolio that will provide total market exposure to the US equity space. It's beta is 1.01, which indicates that its price tends to be slightly more volatile than the market. It is expected to yield high returns, and has almost no diversifiable risk because its R-squared is around 99.
+
+### VEA
+
+  VEA(Vanguard Developed Markets Index Fund) is a fund that is passively managed to provide exposure to developed markets in the ex-US equity space. Tends to hold stocks of any market capitalization. It's beta is 1.09, which means its price tends to move with the markets price, but to a higher magnitude than the market. It is expected to yield high returns, and has very little diversifiable risk due to its R-squared value being around 97.
+
+### VWO
+
+  VWO(Vanguard Emerging Markets Stock Index Fund) is a fund that is passively managed to provide exposure to the emerging markets equity space. It tends to hold stocks of any market capitalization. Its beta is .84, which means it decently moves with the market. There is a lot more diversifiable risk in this asset relative to the other ETFs (R-squared value is around 80), which means the expected return will likely be lower.
+
+### VIG
+
+  VIG(Vanguard Dividend Appreciation Index Fund) tracks a market-cap-weighted index of specific US companies. Those companies must have increased their annual dividends for many consecutive years. VIG's beta is .85, which means it somewhat moves with the market, and will have a good amount of diversifiable risk. This means it will have a lower expected return than the other ETFs.
+
+## 2. Return calculations and Sample Statistics
+
+### Monthly Returns
+
+  Below are visualizations that help show the volatility and range of the simple RETURNS of each ETF. Another reminder that these are just ETF returns alone, no portfolio is formed as of yet.
+
+```{r, echo = FALSE}
+
+plot.xts(projectReturns[,"VTI"], multi.panel=FALSE, yaxis.same=TRUE, 
+     main="", lwd=2, col = 'red')
+title(main="VTI Monthly")
+```
+```{r, echo = FALSE}
+plot.xts(projectReturns[,"VTEB"], multi.panel=FALSE, yaxis.same=TRUE, 
+     main="", lwd=2, col = 'blue')
+title(main="VTEB Monthly")
+```
+```{r, echo = FALSE}
+plot.xts(projectReturns[,"VEA"], multi.panel=FALSE, yaxis.same=TRUE, 
+     main="", lwd=2, col = 'green')
+title(main="VEA Monthly")
+```
+```{r, echo = FALSE}
+plot.xts(projectReturns[,"VWO"], multi.panel=FALSE, yaxis.same=TRUE, 
+     main="", lwd=2, col = 'purple')
+title(main="VWO Monthly")
+```
+```{r, echo = FALSE}
+plot.xts(projectReturns[,"VIG"], multi.panel=FALSE, yaxis.same=TRUE, 
+     main="", lwd=2, col = 'orange')
+title(main="VIG Monthly")
+```
+
+#### Takeaway
+
+  If you know what ETFs are, the similarities in pattern among these graphs is not exactly surprising. We see a lot of volatility throughout these 5 years, but the plummeting of returns seem to be very correlated at the end of 2019. As many may remember, the COVID pandemic took the market by storm and utterly demolished the healthy economy that was built. ETFs tend to follow a particular index, which include a bunch of different assets. Although this means that there are different correlation relationships between these different ETFs, no asset is completely immune to a large market crash like the one we've seen in 2019.
+
+Below are some statistics about the monthly return of each ETF.
+```{r, echo=FALSE}
+print(stats.r.mat)
+```
+
+
+  As shown above, VIG has the highest monthly return with 1%, while VWO has the lowest average return with .1%. 
+
+  We can also see that VTI has the highest standard deviation with 5.5%, while VTEB has the lowest with 1.5%. Standard deviation is usually the risk indicator for ETFs and stocks. Higher standard deviation means higher uncertainty and risk.
+
+#### Plotting growth of $1
+
+  To understand these returns, I've provided a plot that shows how an investment of $1 would've grown in each ETF. We're assuming that you've held this dollar at the beginning of 2018.
+```{r, echo=FALSE}
+equityCurves = cumprod(1 + projectReturns)  
+plot.zoo(equityCurves, plot.type="single", ylab="Cumulative Returns",col=1:5, lwd=2)
+legend(x="topleft", legend=colnames(equityCurves),col=1:5, lwd=2)
+```
+
+  
+#### x-y Plot with Standard Deviations on x-axis and Mean Returns on y-axis
+```{r, echo=FALSE}
+plot(sighat, muhat, ylab="mean", xlab="volatility", col=1:5, ylim=c(0, .015), xlim=c(0, .3))
+text(sighat, muhat, labels=colnames(projectPrices), pos=1)
+```
+  
+  In a perfectly normal world, there will be higher risk associated with higher return assets. Although this is most common and the rule that makes most sense, there are always some caveats and exceptions in the real world. There seems to be a standard risk-return relationship with these ETFs. The only exception to this was VTEB where they had a higher return than both VEA and VWO (or these two ETFs may be the weird ones) but a lower volatility than them.
+  
+## 3. Distribution of ETFs
+```{r, echo=FALSE}
+fourPanelPlot(projectReturns[, "VTI", drop=FALSE])
+fourPanelPlot(projectReturns[, "VIG", drop=FALSE])
+fourPanelPlot(projectReturns[, "VTEB", drop=FALSE])
+fourPanelPlot(projectReturns[, "VWO", drop=FALSE])
+fourPanelPlot(projectReturns[, "VEA", drop=FALSE])
+```
+
+  Looking through each of the ETF distributions, we could argue that VWO has the most norally looking distribution based on each of the plots shown. We see a nice bell-shaped curve in our histogram, and we get to see a nice smooth spread of data in our box plot graph. We also see a continuous line of data in our data that follows the theoretical Quantiles line. If we had to choose an ETF that wasn't very normally distributed, it would be VTEB.
+  
+
+## 4. Portfolio Theory
+
+  A portfolio is defined as a collection of stocks, funds, and other assets that are pooled together in an attempt to make a better/safer investment. It's common knowledge that diversifying a portfolio can help reduce the risk of a portfolio; this means combining a bunch of assets that have varying correlation patterns. But the job is far from done, because we need to think about how much of each asset we need to include!
+
+  Someone creating a portfolio consisting of multiple assets(these 5 ETFs in this instance) will need to follow an extremely important puzzle: how much weight is each asset going to have in the portfolio? Will we have our highest earning assets take on more of the portfolio? Or should we let the low volatility ETFs take on more than the rest? One solution that may be suggested by someone who has recently been introduced to investing may be to equally weigh the portfolios. Do the numbers support this solution?
+
+### Equally Weighted Portfolio (Convenience)
+
+```{r, echo=FALSE}
+ew = rep(1,5)/5
+ew.port = getPortfolio(er = muhat, cov.mat = sigma.mat, weights = ew)
+ew.port
+ew.er = ew.port$er
+ew.sd = ew.port$sd
+ew.er
+ew.sd
+```
+
+  We have created the equally weighted portfolio, consisting of all the ETFs with weights of 20%. Using an R package specified for portfolio statistics, we find that the expected monthly return of this portfolio is .55% while the volatility is 4%. As you can tell, compared to the volatility of the portfolio, .55% return each month is not something you'd like to see. The standard deviation of the portfolio is incredibly high and makes it unpredictable. 
+
+#### Sharpe Ratio
+
+  We'd like to introduce the idea of a Sharpe ratio, which would indicate the SLOPE of an asset in the context of a return(y-axis) and risk/volatility(x-axis) graph that we've shown previously. This translates to the amount of return we're taking per unit of risk. As you may have guessed, we would like a very high sharpe ratio because we'd like to be compensated very well from each unit of risk we are taking. The phrase that I use to explain this ratio is "More Bang for your Buck". We would like more "Bang" (return) for the amount we are paying, which is the "Buck" (risk). Here are the Sharpe Ratios on each Asset individually, and the Equally-Weighted Portfolio:
+```{r, echo=FALSE}
+muhat.a = muhat*12
+sighat.a = sighat*sqrt(12)
+muhat/sighat
+
+mu_ew = ew.er
+sig_ew = ew.sd
+mu_ew/sig_ew
+```
+Monthly Sharpe Ratios:
+VTI:  .1760
+VTEB: .1114
+VEA:  .0831
+VWO:  .0307
+VIG:  .2140
+Equally-weighted portfolio: .136
+
+VIG seems to have the highest sharpe ratio, while VWO seems to have the lowest. The equally weighted portfolio has a Sharpe ratio of 4.73, which means its higher than VWO, VEA, and VTEB, but not higher than VTI and VIG. It's obviously not the worst ratio that we could have, but the sharpe ratio is definitely lower than a couple of the assets individually. Why would we create this portfolio if we can just invest in the asset? It seems like we could get more value out of those assets than and get more value for the amount of risk we're taking on. 
+
+#### VaR
+
+VaR means Value At Risk, which is a way to effectively convey the amount of risk an asset has. Value at Risk shows how much money you could be losing given a specific percent of probability. More commonly, people check the Value at Risk at 1% and 5%. It translates to "You'd lose X amount of money 1%(or 5%) of the time" As you might be able to guess, an investor would like to see a very low amount of money in their VaR. In our case, the VaR will show as a negative number to show loss. Here are the VaR Values of each ETF and the Equally Weighted Portfolio before that.
+```{r, echo=FALSE}
+q.vals = apply(projectReturns, 2, quantile, prob=c(0.01,0.05))
+W0 = 100000
+VaR.individual = q.vals*W0
+VaR.individual <- as.data.frame(VaR.individual)
+VaR.individual = kable(VaR.individual, caption = "VaR For Each ETF ($1000 each)")
+VaR.individual
+ew.var.weights = ew.port$weights * 100000
+var.ew = q.vals*ew.var.weights
+var.ews <- as.data.frame(var.ew)
+var.ews = kable(var.ews, caption = "VaR For Entire Portfolio split by ETF")
+var.ews
+var.ew <- as.data.frame(rowSums(var.ew)) 
+var.ew = kable(var.ew, caption = "Total VaR 1% and 5%")
+var.ew
+```
+
+  The VaR values for 1 and 5% for the equally weighted portfolios are small relative to the VaR values we would've had if we invested the $100,000 into each asset individually.
+  
+#### Portfolio Summary
+  
+  This portfolio is not optimal. It does not account for the varying risk and return characteristics of individual assets and just blindly assigns equal weights to all assets. It seems like there is a way to optimize the trade-off between the risk and return attributes of all the ETFs, but it seems to neglect these differences. Although this may be true, it is an easy way to create a portfolio, while still reaping some of the benefits from diversification.
+
+### Global Minimum Variance Portfolio (Risk)
+
+  Did you know most people in the world are risk averse? They would be willing to give up a portion of their earnings in order to mitigate the risk of losing more than that portion. This is the main way that insurances make their money. Well, let's say that investor an investor is so risk averse, they would like to build a portfolio that would consist of the least amount of risk possible. This is the Global Minimum Variance Portfolio.
+
+Here are the weights to that Global Minimum Variance Portfolio:
+```{r, echo=FALSE}
+gmin.port = globalMin.portfolio(er = muhat, cov.mat = sigma.mat, shorts = TRUE)
+portfolio_summary = summary(gmin.port)
+gmv_er_a = portfolio_summary$er
+gmv_sd_a = portfolio_summary$sd
+```
+  Yes, those are negative weight values for VTI, and VEA. This means that the global minimum variance portfolio requires you to short these ETFs by those given weights. Shorting means that you must borrow them from someone who already owns it, sell them, use the proceeds to invest in your other ETFs, and eventually pay them back. In this case, we are essentially selling other peoples ETFs in order to gain more money for our portfolio, then putting more money into our safer asset which is VTEB (which has the lowest risk if you remember)
+
+#### Sharpe Ratio
+
+```{r, echo=FALSE}
+muhat/sighat
+
+mu_gm = portfolio_summary$er
+sig_gm = portfolio_summary$sd
+mu_gm/sig_gm
+```
+The Global Minimum Variance Portfolio has a monthly sharpe ratio is .193 which means its higher than all the ETFs except VIG. But as you can see below, the monthly volatility for this portfolio is much lower than that of VIG.
+
+
+#### VaR
+
+
+```{r, echo=FALSE}
+var.gmv = q.vals
+VaR.individual
+gmv.var.weights = portfolio_summary$weights * 100000
+var.gmv[, 1] = q.vals[, 1]*gmv.var.weights["VTI"]
+var.gmv[, 2] = q.vals[, 2]*gmv.var.weights["VTEB"]
+var.gmv[, 3] = q.vals[, 3]*gmv.var.weights["VEA"]
+var.gmv[, 4] = q.vals[, 4]*gmv.var.weights["VWO"]
+var.gmv[, 5] = q.vals[, 5]*gmv.var.weights["VIG"]
+var.gmvs <- as.data.frame(var.gmv)
+
+# Assign a title to the table
+var.gmvs <- kable(var.gmvs, caption = "VaR Values for GMV Portfolio")
+var.gmvs
+var.gmv <- as.data.frame(rowSums(var.gmv)) 
+var.gmv = kable(var.gmv, caption = "Total VaR 1% and 5%")
+var.gmv
+```
+
+
+  The VaR values for 1 and 5% for the GMV portfolios are VERY SMALL relative to the VaR values we would've had if we invested the $100,000 into each asset individually. Because this is the lowest risk for any combination of the 5 assets into a portfolio, it will not have a VaR lower than this. Some values show as positive because in those 1% or 5% cases, you're not losing money.
+  
+#### Portfolio Summary
+
+  
+  As stated before, the GMV portfolio takes into account all the risk attributes of the ETFs and creates an ideal portfolio for risk. This is optimal diversification, which will reduce the risk impact of each and every asset while still involving each one. Investors who prioritize risk reduction highly will seek to invest in portfolios that are close to this portfolio, if not invest in the GMV portfolio itself.
+
+### Efficient Frontier
+
+  An Efficient Frontier is a frontier of portfolios that differ in weight and is considered EFFICIENT. By efficient, I mean that there is no possible way of obtaining a higher return from this portfolio without accepting more risk. As we can see by the graph below, this creates a really nice bullet-like shape. This is the Markowitz Bullet. Anything below the global minimum variance is not considered efficient. This is also assuming that we allow short-selling.
+  
+```{r, echo=FALSE}
+frontier = efficient.frontier(muhat, sigma.mat, nport = 35, alpha.min = -1,
+  alpha.max = 2)
+plot(frontier, plot.assets=TRUE)
+points(x = gmv_sd_a, y = gmv_er_a, col="blue")
+text(x = gmv_sd_a, y = gmv_er_a, labels = "GMV")
+points(x = ew.sd, y = ew.er, col="red")
+text(x = ew.sd, y = ew.er, labels = "Equal-Weighted")
+```
+
+
+  I had introduced this important feature of Portfolio Theory at this time in order to help create our next portfolio.
+
+### Tangency Portfolio (Value)
+
+  For this portfolio, we would like to emphasize the Sharpe Ratio even more. We've looked at the ratios from the Equally-weighted and the GMV portfolios, but how about we create one that will have the highest "Bang for their Buck". In order to create this portfolio, we will also have to introduce government bonds. This creates a "risk-free" asset that has a 0% risk. This will create a y-intercept for our risk-return plot. I will explain why this is important later.
+
+  Assuming the risk-free monthly rate(rate of return for an investment with 0 risk) is .167%, these are the statistics for the Tangency Portfolio:
+```{r, echo=FALSE}
+rf = .00167
+tan.port = tangency.portfolio(muhat, sigma.mat, rf)
+tan.port
+```
+In this portfolios ETF weight distribution, only VEA has a negative weight. As you can see, the expected return is incredibly high at around 1.7%, while only have a 5.3% volatility. Although this portfolio has a somewhat large risk associated with it, it will grant the best value out of any combination of the ETFs listed. This can serve as an upperbound as well as an ideal portfolio with someone that tolerates risk and is motivated toward high returns.
+
+The monthly Sharpe ratio for the Tangency portfolio is .285, which is higher than any of the individual ETF Sharpe ratios. As shown below:
+
+```{r, echo=FALSE}
+muhat/sighat
+(tan.port$er - rf) / tan.port$sd
+```
+Here we show how to Plot the Tangency Portfolio with efficient frontier of Risky Assets:
+
+```{r, echo=FALSE}
+plot(frontier, plot.assets=TRUE)
+points(x = tan.port$sd, y = tan.port$er, col="blue")
+text(x = tan.port$sd, y = tan.port$er, labels = "Tan")
+abline(a = rf, .285)
+points(x = 0, y = rf, col="blue")
+text(x = 0, y = rf, labels = "rf")
+```
+
+The way that we find the Tangency Portfolio is to find the point where a straight line from the y-axis (risk-free rate) can go tangent with the Markowitz Bullet, hence earning the name: Tangency Portfolio. This ensures the highest slope of the bullet and creates a portfolio with weights that give the best value given the risk.
+
+#### Portfolio Summary
+
+  A Tangency portfolio is a combination of risky assets and a risk-free asset. To maximize the risk-adjusted return, we need to consider the Sharpe Ratio. Although this may create a portfolio with high risk, it will attract investors who may have a long investment horizon and can handle a lot of fluctuation as long as the return is high. This is a portfolio for more risk-tolerant investors.
+
+
+## 5. Risk Budgeting
+
+Let's go back to our Equally-Weighted Portfolio example. We now know that this way of distributing the weights is not exactly optimal, but we'd like to know why. I have created a small report in order to break down the risk attributes of each asset in our Equally-weight portfolio. Hypothetically, we will split $10000 equally into our portfolio. I will briefly define some of the terms required to understand risk contribution.
+```{r, echo=FALSE}
+sig.vec = sqrt(diag(sigma.mat))
+names(muhat) = names(sig.vec) = colnames(projectReturns)
+dimnames(sigma.mat) = list(colnames(projectReturns), colnames(projectReturns))
+x = rep(1/5, 5)
+d = x*W0
+names(x) = colnames(projectReturns)
+mu.px = as.numeric(crossprod(x, muhat))
+sig.px = as.numeric(sqrt(t(x)%*%sigma.mat%*%x))
+MCR.vol.x = (sigma.mat%*%x)/sig.px
+CR.vol.x = x*MCR.vol.x
+PCR.vol.x = CR.vol.x/sig.px
+rho.x = MCR.vol.x/sig.vec
+beta.x = PCR.vol.x/x
+riskReportVol.px = cbind(100000*x, x, sig.vec, MCR.vol.x, CR.vol.x,
+PCR.vol.x, rho.x, beta.x)
+PORT = c(100000, 1, NA, NA, sum(CR.vol.x), sum(PCR.vol.x), 1, 1)
+riskReportVol.px = rbind(riskReportVol.px, PORT)
+colnames(riskReportVol.px) = c("Dollar", "Weight", "Vol",
+"MCR", "CR", "PCR", "Rho", "Beta")
+riskReportVol.px
+
+```
+
+* MCR = Marginal contribution to the risk of the portfolio (contribution of risk by each unit of the asset)
+* CR = Contribution to the risk of the portfolio (contribution of total risk by the asset)
+* PCR = Percentage of Contribution to the risk of the portfolio (Percent of the portfolio's risk that is from the asset)
+
+The risk attribution does NOT match the asset allocation. We have many varying contributions of risk in the portfolio, so its just a mess. We can easily look at the PCR column to see how the risk is not distributed evenly within the portfolio. We'd ideally like to have each asset's contribution to risk at 20%. There is definitely room for improvement in allocating the assets by just looking at these values.
+
+The asset that contributes most to the portfolio risk is VTI, while the asset that contributes the least to portfolio risk is VTEB. The simple general solution is to remove shares of VTI to take in shares from VTEB. This will undoubtedly create a better spread of risk.
+
+## 6. Summary
+
+In Summary, this Project explores Portfolio Theory using real data from real ETFs. The creation of three portfolios shows the different weights and different objectives.
+
+* The Equally-Weighted Portfolio shows how just a naive assignment of weights to each ETF can still take advantage of diversification, but is not close to being efficient.
+* The Global Minimum Variance Portfolio is introduced as the lowest risk portfolio, which will have the lowest volatility and Value at Risk in exchange for return potential.
+* The Efficient Frontier is not a portfolio but an important way for us to view how much benefit and risk is gained or lost between assets/portfolios.
+* The Tangency Portfolio seeks to maximize the risk-adjusted return and finds the point in the Markowitz bullet that achieves this.
+
+In conclusion, this project emphasizes the importance of portfolio construction and optimization based on risk and return characteristics. Highlighting the different portfolios' performance and risk attributes, I hope to guide new investors to make informed decisions.
+
+
+
+
+
+
+
+
+
